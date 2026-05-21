@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Tuple
 
 import numpy as np
-
+import math
+from scipy import ndimage
 
 def compute_costmap(
     static_map: np.ndarray,
@@ -17,7 +18,7 @@ def compute_costmap(
     ----------
     static_map : np.ndarray, shape (rows, cols), dtype int8
         0 = free cell, 1 = obstacle cell.
-
+    
     Returns
     -------
     costmap : np.ndarray, shape (rows, cols), dtype uint8
@@ -42,8 +43,15 @@ def compute_costmap(
       inflation radius that is too large will also cause the robot to take a
       longer route, wasting time.
     """
-    # TODO: Implement a function to compute a costmap from the static map by inflating obstacles.
-    return static_map.copy()
+    inflation_radius=3
+    rows, cols = static_map.shape
+    static_map_reverse=np.ones((rows,cols))-static_map
+    distance = ndimage.distance_transform_edt(static_map_reverse)
+    costmap = np.where(static_map_reverse == 1, 0, 255).astype(np.uint8)
+    mask = (distance > 0) & (distance <= inflation_radius)
+    costmap[mask] = (255 * (1 - distance[mask] / inflation_radius)).astype(np.uint8)
+    
+    return costmap
 
 
 def update_local_costmap(
@@ -92,5 +100,42 @@ def update_local_costmap(
       a static obstacle; otherwise the lidar's view of a wall keeps
       re-inflating the same area.
     """
+    rows, cols = static_map.shape
+    dyn_map=np.zeros((rows, cols))
     # TODO: Implement a function to update the global costmap with a local dynamic layer based on the lidar scan.
-    return static_map.copy()
+    for i in range(lidar_num_rays):
+        if lidar_scan[i] >= lidar_range:
+            continue
+        angle=2*math.pi*i/lidar_num_rays
+        world_point=[0,0]
+        world_point[0]=int(robot_pos[0]+lidar_scan[i]*math.cos(angle))
+        world_point[1]=int(robot_pos[1]+lidar_scan[i]*math.sin(angle))
+        if world_point[0]<0 or world_point[0]>=cols or world_point[1]<0 or world_point[1]>=rows:
+            continue
+        
+        dyn_map[world_point[1],world_point[0]]=1
+   
+    
+    
+    from scipy.ndimage import binary_dilation
+    dynamic_radius = 1   # 小膨胀半径
+    struct = np.ones((2*dynamic_radius+1, 2*dynamic_radius+1))
+    dyn_map = binary_dilation(dyn_map, structure=struct)
+    dynamic_costmap = np.zeros((rows, cols), dtype=np.uint8)
+    dynamic_costmap[dyn_map] = 255
+    costmap_static=compute_costmap(static_map)
+    cost=np.maximum(dynamic_costmap,costmap_static)
+        
+        
+    return cost
+
+
+
+
+
+
+print(compute_costmap(np.array(([0,1,1,1,1],
+              [0,0,1,1,1],
+              [0,1,1,1,1],
+              [0,1,1,1,0],
+              [0,1,1,0,0]))))
